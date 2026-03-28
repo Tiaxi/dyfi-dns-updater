@@ -65,11 +65,17 @@ install() {
         cp "$SCRIPT_DIR/$f" "$INSTALL_DIR/"
     done
 
-    # Preserve existing .env
+    # Preserve existing .env; copy source .env if available, else use template
     if [[ ! -f "$INSTALL_DIR/.env" ]]; then
-        cp "$SCRIPT_DIR/.env.example" "$INSTALL_DIR/.env"
-        chmod 600 "$INSTALL_DIR/.env"
-        ENV_CREATED=true
+        if [[ -f "$SCRIPT_DIR/.env" ]]; then
+            cp "$SCRIPT_DIR/.env" "$INSTALL_DIR/.env"
+            chmod 600 "$INSTALL_DIR/.env"
+            ENV_CREATED=false
+        else
+            cp "$SCRIPT_DIR/.env.example" "$INSTALL_DIR/.env"
+            chmod 600 "$INSTALL_DIR/.env"
+            ENV_CREATED=true
+        fi
     else
         echo "Existing .env preserved."
         ENV_CREATED=false
