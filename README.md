@@ -81,7 +81,7 @@ uv run updater.py --force
 | `EMAIL_SMTP_HOST` | No | `smtp.gmail.com` | SMTP server hostname |
 | `EMAIL_SMTP_PORT` | No | `587` | SMTP server port |
 
-## systemd Service (Raspberry Pi)
+## systemd Service
 
 For automatic startup on boot:
 
