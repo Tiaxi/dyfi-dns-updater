@@ -83,13 +83,16 @@ uv run updater.py --force
 
 ## systemd Service
 
-For automatic startup on boot:
+For automatic startup on boot, use the install script:
 
 ```bash
-# Deploy project files to /opt/dyfi-dns-updater (or adjust WorkingDirectory in the service file)
-sudo cp systemd/dyfi-dns-updater.service /etc/systemd/system/
-sudo systemctl daemon-reload
-sudo systemctl enable --now dyfi-dns-updater
+sudo ./install.sh
+```
+
+This copies project files to `/opt/dyfi-dns-updater`, installs the systemd service, and enables it. On first install, edit `/opt/dyfi-dns-updater/.env` with your credentials, then start:
+
+```bash
+sudo systemctl start dyfi-dns-updater
 ```
 
 Manage with standard systemctl commands:
@@ -98,6 +101,12 @@ Manage with standard systemctl commands:
 sudo systemctl status dyfi-dns-updater
 sudo systemctl restart dyfi-dns-updater
 sudo journalctl -u dyfi-dns-updater -f
+```
+
+To uninstall:
+
+```bash
+sudo ./install.sh --uninstall
 ```
 
 ## Multiple Domains
