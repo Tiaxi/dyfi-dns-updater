@@ -1,0 +1,7 @@
+[project]
+name = "dyfi-dns-updater"
+version = "1.0.0"
+description = "Dynamic DNS updater for dy.fi"
+requires-python = ">=3.13"
+license = "MIT"
+dependencies = ["requests>=2.28,<3"]

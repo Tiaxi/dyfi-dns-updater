@@ -1,0 +1,8 @@
+name: dyfi-dns-updater
+
+services:
+  dyfi-dns-updater:
+    build: .
+    container_name: dyfi-dns-updater
+    restart: unless-stopped
+    env_file: .env

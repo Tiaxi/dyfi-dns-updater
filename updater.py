@@ -1,123 +1,216 @@
 import argparse
-import base64
 import logging
+import os
+import signal
 import smtplib
 import sys
-import time
+import threading
 from collections import deque
+from dataclasses import dataclass
+from email.message import EmailMessage
 from logging.handlers import RotatingFileHandler
+
 import requests
 
-from email_creds import email_creds
-from creds import dyndns_creds
+logger = logging.getLogger("dyfi-dns-updater")
+shutdown_event = threading.Event()
 
 
-URL = f'https://www.dy.fi/nic/update?hostname={dyndns_creds["domain"]}'
-GLOBAL_LOG_LEVEL = logging.INFO
-LOG_FILE = 'dyndns_update.log'
-CHECK_INTERVAL = 5
-FORCE_UPDATE_INTERVAL_DAYS = 2
-logger = logging.getLogger()
+@dataclass
+class EmailConfig:
+    smtp_host: str
+    smtp_port: int
+    user: str
+    password: str
+    recipient: str
 
 
-def setup_logging():
-    formatter = logging.Formatter('[%(asctime)s] %(levelname)s - %(message)s', datefmt='%d.%m.%Y %H:%M:%S')
-    handler = RotatingFileHandler(LOG_FILE, mode='a', maxBytes=5*1024*1024, backupCount=2, encoding='utf-8', delay=0)
-    handler.setFormatter(formatter)
-    handler.setLevel(GLOBAL_LOG_LEVEL)
+@dataclass
+class Config:
+    dyfi_user: str
+    dyfi_pass: str
+    dyfi_domain: str
+    check_interval: int = 5
+    force_update_days: int = 2
+    log_file: str = ""
+    email: EmailConfig | None = None
+
+    @property
+    def update_url(self) -> str:
+        return f"https://www.dy.fi/nic/update?hostname={self.dyfi_domain}"
+
+    @property
+    def force_update_checks(self) -> int:
+        return self.force_update_days * 24 * 60 // self.check_interval
+
+    @classmethod
+    def from_env(cls) -> "Config":
+        email = None
+        if os.environ.get("EMAIL_ENABLED", "false").lower() == "true":
+            email = EmailConfig(
+                smtp_host=os.environ.get("EMAIL_SMTP_HOST", "smtp.gmail.com"),
+                smtp_port=int(os.environ.get("EMAIL_SMTP_PORT", "587")),
+                user=os.environ["EMAIL_USER"],
+                password=os.environ["EMAIL_PASS"],
+                recipient=os.environ["EMAIL_RECIPIENT"],
+            )
+        return cls(
+            dyfi_user=os.environ["DYFI_USER"],
+            dyfi_pass=os.environ["DYFI_PASS"],
+            dyfi_domain=os.environ["DYFI_DOMAIN"],
+            check_interval=int(os.environ.get("CHECK_INTERVAL_MINUTES", "5")),
+            force_update_days=int(os.environ.get("FORCE_UPDATE_DAYS", "2")),
+            log_file=os.environ.get("LOG_FILE", ""),
+            email=email,
+        )
+
+
+def handle_signal(signum, _frame):
+    logger.info(f"Received signal {signum}, shutting down")
+    shutdown_event.set()
+
+
+def setup_logging(log_file: str) -> None:
+    formatter = logging.Formatter(
+        "[%(asctime)s] %(levelname)s - %(message)s", datefmt="%d.%m.%Y %H:%M:%S"
+    )
     stream_handler = logging.StreamHandler(sys.stdout)
     stream_handler.setFormatter(formatter)
-    log = logging.getLogger()
-    log.setLevel(GLOBAL_LOG_LEVEL)
-    log.addHandler(handler)
-    log.addHandler(stream_handler)
+    logger.addHandler(stream_handler)
+    if log_file:
+        file_handler = RotatingFileHandler(
+            log_file, mode="a", maxBytes=5 * 1024 * 1024, backupCount=2, encoding="utf-8"
+        )
+        file_handler.setFormatter(formatter)
+        logger.addHandler(file_handler)
+    logger.setLevel(logging.INFO)
 
 
-def get_ip_address():
+def get_ip_address() -> str | None:
     try:
-        return requests.get('https://api.ipify.org?format=json', timeout=30).json()['ip']
-    except Exception as e:
-        logger.warning('Could not get IP address from API: {}'.format(str(e)))
-        return ''
+        return requests.get("https://api.ipify.org?format=json", timeout=30).json()["ip"]
+    except Exception:
+        logger.warning("Could not get IP address", exc_info=True)
+        return None
 
 
-def update_dyndns(ip_address):
-    logger.info(f'Updating dy.fi DNS for {dyndns_creds["domain"]}')
+def update_dyndns(config: Config, ip_address: str) -> bool:
+    logger.info(f"Updating dy.fi DNS for {config.dyfi_domain}")
     try:
-        r = requests.get(URL, auth=(dyndns_creds['user'], dyndns_creds['pass']), timeout=30)
-    except Exception as e:
-        logger.error('Could not update dy.fi DNS: {}'.format(str(e)))
+        r = requests.get(
+            config.update_url,
+            auth=(config.dyfi_user, config.dyfi_pass),
+            timeout=30,
+        )
+    except Exception:
+        logger.error("Could not reach dy.fi", exc_info=True)
         return False
-    if r.status_code == 200:
-        logger.info('Updated successfully to {}'.format(ip_address))
+    body = r.text.strip()
+    if r.status_code == 200 and body.startswith(("good", "nochg")):
+        logger.info(f"Updated successfully to {ip_address} (response: {body})")
+        return True
+    logger.warning(f"dy.fi update failed: HTTP {r.status_code}, body: {body}")
+    return False
+
+
+def get_latest_logs(log_file: str) -> str:
+    if not log_file:
+        return "(file logging disabled)"
+    try:
+        with open(log_file) as f:
+            return "".join(deque(f, 10))
+    except FileNotFoundError:
+        return "(no log file available)"
+
+
+def send_email(config: Config, ip_address: str, success: bool) -> None:
+    if not config.email:
+        return
+    status = "succeeded" if success else "FAILED"
+    subject = f"dy.fi DNS update {status} for {config.dyfi_domain}"
+    latest_logs = get_latest_logs(config.log_file)
+    body = f"IP address: {ip_address}\nStatus: {status}\n\nRecent logs:\n{latest_logs}"
+
+    msg = EmailMessage()
+    msg["From"] = config.email.user
+    msg["To"] = config.email.recipient
+    msg["Subject"] = subject
+    msg.set_content(body)
+
+    try:
+        with smtplib.SMTP(config.email.smtp_host, config.email.smtp_port) as server:
+            server.ehlo()
+            server.starttls()
+            server.login(config.email.user, config.email.password)
+            server.send_message(msg)
+        logger.info(f"Sent notification to {config.email.recipient}")
+    except Exception:
+        logger.error("Failed to send notification email", exc_info=True)
+
+
+def run_force_update(config: Config) -> None:
+    ip_address = get_ip_address()
+    if not ip_address:
+        logger.error("Could not determine IP address, aborting")
+        sys.exit(1)
+    logger.info(f"Current IP address is {ip_address}")
+    success = update_dyndns(config, ip_address)
+    send_email(config, ip_address, success)
+    sys.exit(0 if success else 1)
+
+
+def run_polling_loop(config: Config) -> None:
+    logger.info(f"Check interval: {config.check_interval} minutes")
+    logger.info(f"Force update interval: {config.force_update_days} days")
+    prev_ip = get_ip_address()
+    if prev_ip:
+        logger.info(f"Initial IP address is {prev_ip}")
+    checks = 0
+
+    while not shutdown_event.is_set():
+        ip = get_ip_address()
+        if ip:
+            logger.info(f"Current IP address is {ip}")
+            force = checks >= config.force_update_checks
+            if prev_ip != ip or force:
+                if force:
+                    logger.info(
+                        f"Forcing update after {checks} checks "
+                        f"({config.force_update_days} days)"
+                    )
+                else:
+                    logger.info(f"IP address changed: {prev_ip} -> {ip}")
+                success = update_dyndns(config, ip)
+                if success:
+                    prev_ip = ip
+                    checks = 0
+                    send_email(config, ip, success=True)
+                else:
+                    logger.error("Update failed, will retry")
+        checks += 1
+        if shutdown_event.wait(timeout=config.check_interval * 60):
+            break
+
+    logger.info("Shutdown complete")
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description="dy.fi Dynamic DNS Updater")
+    parser.add_argument("--force", action="store_true", help="Force a single update and exit")
+    args = parser.parse_args()
+
+    signal.signal(signal.SIGTERM, handle_signal)
+    signal.signal(signal.SIGINT, handle_signal)
+
+    config = Config.from_env()
+    setup_logging(config.log_file)
+    logger.info("dyfi-dns-updater started")
+
+    if args.force:
+        run_force_update(config)
     else:
-        logger.warning('dy.fi DNS returned status code {}, update failed'.format(r.status_code))
-        return False
-    return True
+        run_polling_loop(config)
 
 
-def force_update_reached(times_checked):
-    return times_checked >= FORCE_UPDATE_INTERVAL_DAYS * 24 * 60 // CHECK_INTERVAL
-
-
-def get_latest_logs():
-    with open(LOG_FILE) as handle:
-        return ''.join(deque(handle, 10))
-
-
-def send_email_with_ip(ip_address):
-    latest_logs = get_latest_logs()
-    message = f'From: {email_creds["user"]}@gmail.com\nTo: {dyndns_creds["recipient_email"]}\nSubject: DNS updated for dy.fi\n\nIP address: {ip_address}\n\n{latest_logs}'
-    try:
-        server = smtplib.SMTP('smtp.gmail.com', 587)
-        server.ehlo()
-        server.starttls()
-        server.login(f'{email_creds["user"]}@gmail.com', base64.b64decode(email_creds['password']).decode('ascii'))
-        server.sendmail(f'{email_creds["user"]}@gmail.com', dyndns_creds['recipient_email'], message)
-        server.close()
-        logger.info(f'Sent mail to {dyndns_creds["recipient_email"]}')
-    except Exception as e:
-        logger.error('Sending mail failed: {}'.format(str(e)))
-
-
-def main(args):
-    setup_logging()
-    logger.info('Dynamic DNS updater started')
-    logger.info('IP address check interval is {} minutes'.format(CHECK_INTERVAL))
-    prev_ip_address = get_ip_address()
-    times_checked = 0
-    while True:
-        ip_address = get_ip_address()
-        logger.info('Current IP address is {}'.format(ip_address))
-        if ip_address and args.force:
-            logger.info('Forcing IP address change because of the force argument')
-            success = update_dyndns(ip_address)
-            if success:
-                logger.info('IP updated successfully')
-            send_email_with_ip(ip_address)
-            sys.exit(0)
-        if ip_address and (prev_ip_address != ip_address or force_update_reached(times_checked)):
-            if force_update_reached(times_checked):
-                logger.info('Forcing IP address update after {} checks ({} days)'.format(times_checked, FORCE_UPDATE_INTERVAL_DAYS))
-            else:
-                logger.info('IP address change detected ({}, previously {})'.format(ip_address, prev_ip_address))
-            success = update_dyndns(ip_address)
-            if success:
-                prev_ip_address = ip_address
-                logger.info('IP updated successfully')
-                times_checked = 0
-            else:
-                logger.error('IP update failed')
-            send_email_with_ip(ip_address)
-        times_checked += 1
-        time.sleep(CHECK_INTERVAL * 60)
-
-
-def get_arguments():
-    parser = argparse.ArgumentParser()
-    parser.add_argument('--force', action='store_true', help='Force single update')
-    return parser.parse_args()
-
-
-if __name__ == '__main__':
-    main(get_arguments())
+if __name__ == "__main__":
+    main()

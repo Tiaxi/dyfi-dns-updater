@@ -1,0 +1,11 @@
+.git
+.gitignore
+.idea
+*.log
+*_creds.py
+.env
+.env.*
+*.service
+README.md
+LICENSE
+__pycache__
