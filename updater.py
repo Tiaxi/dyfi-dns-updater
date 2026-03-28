@@ -3,12 +3,14 @@ import logging
 import os
 import signal
 import smtplib
+import ssl
 import sys
 import threading
 from collections import deque
 from dataclasses import dataclass
 from email.message import EmailMessage
 from logging.handlers import RotatingFileHandler
+from pathlib import Path
 
 import requests
 
@@ -54,12 +56,18 @@ class Config:
                 password=os.environ["EMAIL_PASS"],
                 recipient=os.environ["EMAIL_RECIPIENT"],
             )
+        check_interval = int(os.environ.get("CHECK_INTERVAL_MINUTES", "5"))
+        if check_interval < 1:
+            raise ValueError(f"CHECK_INTERVAL_MINUTES must be >= 1, got {check_interval}")
+        force_update_days = int(os.environ.get("FORCE_UPDATE_DAYS", "2"))
+        if force_update_days < 1:
+            raise ValueError(f"FORCE_UPDATE_DAYS must be >= 1, got {force_update_days}")
         return cls(
             dyfi_user=os.environ["DYFI_USER"],
             dyfi_pass=os.environ["DYFI_PASS"],
             dyfi_domain=os.environ["DYFI_DOMAIN"],
-            check_interval=int(os.environ.get("CHECK_INTERVAL_MINUTES", "5")),
-            force_update_days=int(os.environ.get("FORCE_UPDATE_DAYS", "2")),
+            check_interval=check_interval,
+            force_update_days=force_update_days,
             log_file=os.environ.get("LOG_FILE", ""),
             email=email,
         )
@@ -140,7 +148,7 @@ def send_email(config: Config, ip_address: str, success: bool) -> None:
     try:
         with smtplib.SMTP(config.email.smtp_host, config.email.smtp_port) as server:
             server.ehlo()
-            server.starttls()
+            server.starttls(context=ssl.create_default_context())
             server.login(config.email.user, config.email.password)
             server.send_message(msg)
         logger.info(f"Sent notification to {config.email.recipient}")
@@ -186,7 +194,10 @@ def run_polling_loop(config: Config) -> None:
                     checks = 0
                     send_email(config, ip, success=True)
                 else:
+                    if force:
+                        send_email(config, ip, success=False)
                     logger.error("Update failed, will retry")
+        Path("/tmp/healthcheck").touch()
         checks += 1
         if shutdown_event.wait(timeout=config.check_interval * 60):
             break

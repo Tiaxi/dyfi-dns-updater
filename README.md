@@ -107,8 +107,8 @@ Run separate containers with different environment files:
 ```bash
 cp .env.example .env.domain1  # edit with first domain's credentials
 cp .env.example .env.domain2  # edit with second domain's credentials
-docker compose --env-file .env.domain1 up -d
-docker compose --env-file .env.domain2 up -d
+ENV_FILE=.env.domain1 docker compose -p domain1 up -d
+ENV_FILE=.env.domain2 docker compose -p domain2 up -d
 ```
 
 ## License
