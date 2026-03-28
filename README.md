@@ -87,7 +87,7 @@ For automatic startup on boot:
 
 ```bash
 # Deploy project files to /opt/dyfi-dns-updater (or adjust WorkingDirectory in the service file)
-sudo cp dyfi-dns-updater.service /etc/systemd/system/
+sudo cp systemd/dyfi-dns-updater.service /etc/systemd/system/
 sudo systemctl daemon-reload
 sudo systemctl enable --now dyfi-dns-updater
 ```
@@ -109,6 +109,13 @@ cp .env.example .env.domain1  # edit with first domain's credentials
 cp .env.example .env.domain2  # edit with second domain's credentials
 ENV_FILE=.env.domain1 docker compose -p domain1 up -d
 ENV_FILE=.env.domain2 docker compose -p domain2 up -d
+```
+
+## Testing
+
+```bash
+uv sync   # install dependencies including dev tools
+uv run pytest
 ```
 
 ## License

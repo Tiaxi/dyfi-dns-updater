@@ -5,3 +5,10 @@ description = "Dynamic DNS updater for dy.fi"
 requires-python = ">=3.13"
 license = "MIT"
 dependencies = ["requests>=2.28,<3"]
+
+[dependency-groups]
+dev = ["pytest>=8"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
