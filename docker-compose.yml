@@ -6,3 +6,5 @@ services:
     container_name: dyfi-dns-updater
     restart: unless-stopped
     env_file: ${ENV_FILE:-.env}
+    volumes:
+      - /etc/localtime:/etc/localtime:ro
