@@ -178,7 +178,10 @@ def run_polling_loop(config: Config) -> None:
     while not shutdown_event.is_set():
         ip = get_ip_address()
         if ip:
-            logger.info(f"Current IP address is {ip}")
+            logger.info(
+                f"Current IP address is {ip}"
+                f" (check {checks}/{config.force_update_checks})"
+            )
             force = checks >= config.force_update_checks
             if prev_ip != ip or force:
                 if force:

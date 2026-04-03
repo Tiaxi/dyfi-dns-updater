@@ -12,7 +12,6 @@ Monitors your public IP address and automatically updates your dy.fi hostname wh
 - Optional email notifications on successful updates
 - Graceful shutdown on SIGTERM/SIGINT
 - Docker with multi-arch support (amd64, arm64, arm/v7)
-- systemd service for automatic startup on boot
 
 ## Quick Start (Docker)
 
@@ -80,34 +79,6 @@ uv run updater.py --force
 | `EMAIL_RECIPIENT` | No | — | Notification recipient email |
 | `EMAIL_SMTP_HOST` | No | `smtp.gmail.com` | SMTP server hostname |
 | `EMAIL_SMTP_PORT` | No | `587` | SMTP server port |
-
-## systemd Service
-
-For automatic startup on boot, use the install script:
-
-```bash
-sudo ./install.sh
-```
-
-This copies project files to `/opt/dyfi-dns-updater`, installs the systemd service, and enables it. On first install, edit `/opt/dyfi-dns-updater/.env` with your credentials, then start:
-
-```bash
-sudo systemctl start dyfi-dns-updater
-```
-
-Manage with standard systemctl commands:
-
-```bash
-sudo systemctl status dyfi-dns-updater
-sudo systemctl restart dyfi-dns-updater
-sudo journalctl -u dyfi-dns-updater -f
-```
-
-To uninstall:
-
-```bash
-sudo ./install.sh --uninstall
-```
 
 ## Multiple Domains
 
