@@ -39,7 +39,7 @@ Monitors your public IP address and automatically updates your dy.fi hostname wh
 
 ## Quick Start (Without Docker)
 
-Requires Python 3.13+ and [uv](https://docs.astral.sh/uv/).
+Requires Python 3.14+ and [uv](https://docs.astral.sh/uv/).
 
 ```bash
 uv sync
@@ -95,6 +95,8 @@ ENV_FILE=.env.domain2 docker compose -p domain2 up -d
 
 ```bash
 uv sync   # install dependencies including dev tools
+uv run ruff check .
+uv run ruff format --check .
 uv run pytest
 ```
 

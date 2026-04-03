@@ -1,5 +1,6 @@
-import pytest
 from unittest.mock import patch
+
+import pytest
 
 from updater import Config, EmailConfig
 
@@ -34,15 +35,21 @@ class TestConfig:
 
     def test_force_update_checks(self):
         cfg = Config(
-            dyfi_user="u", dyfi_pass="p", dyfi_domain="d.dy.fi",
-            check_interval=5, force_update_days=2,
+            dyfi_user="u",
+            dyfi_pass="p",
+            dyfi_domain="d.dy.fi",
+            check_interval=5,
+            force_update_days=2,
         )
         assert cfg.force_update_checks == 576  # 2*24*60//5
 
     def test_force_update_checks_custom(self):
         cfg = Config(
-            dyfi_user="u", dyfi_pass="p", dyfi_domain="d.dy.fi",
-            check_interval=10, force_update_days=1,
+            dyfi_user="u",
+            dyfi_pass="p",
+            dyfi_domain="d.dy.fi",
+            check_interval=10,
+            force_update_days=1,
         )
         assert cfg.force_update_checks == 144  # 1*24*60//10
 

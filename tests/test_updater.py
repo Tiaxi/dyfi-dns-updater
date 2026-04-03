@@ -1,6 +1,9 @@
 import logging
+import smtplib
 from logging.handlers import RotatingFileHandler
 from unittest.mock import MagicMock, patch
+
+import requests
 
 from updater import (
     get_ip_address,
@@ -24,7 +27,10 @@ class TestGetIpAddress:
         )
 
     def test_network_error(self):
-        with patch("updater.requests.get", side_effect=Exception("timeout")):
+        with patch(
+            "updater.requests.get",
+            side_effect=requests.ConnectionError("timeout"),
+        ):
             assert get_ip_address() is None
 
 
@@ -50,7 +56,10 @@ class TestUpdateDyndns:
             assert update_dyndns(config, "1.2.3.4") is False
 
     def test_network_error(self, config):
-        with patch("updater.requests.get", side_effect=Exception("refused")):
+        with patch(
+            "updater.requests.get",
+            side_effect=requests.ConnectionError("refused"),
+        ):
             assert update_dyndns(config, "1.2.3.4") is False
 
     def test_uses_correct_auth(self, config):
@@ -121,7 +130,7 @@ class TestSendEmail:
     def test_smtp_error_caught(self, config_with_email, caplog):
         with patch("updater.smtplib.SMTP") as mock_smtp_class:
             mock_server = self._mock_smtp(mock_smtp_class)
-            mock_server.send_message.side_effect = Exception("SMTP error")
+            mock_server.send_message.side_effect = smtplib.SMTPException("SMTP error")
             with caplog.at_level(logging.ERROR, logger="dyfi-dns-updater"):
                 send_email(config_with_email, "1.2.3.4", success=True)
         assert "Failed to send notification email" in caplog.text

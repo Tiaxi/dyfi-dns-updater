@@ -1,5 +1,6 @@
+from unittest.mock import patch
+
 import pytest
-from unittest.mock import patch, MagicMock
 
 from updater import Config, main, run_force_update, run_polling_loop, shutdown_event
 
@@ -15,7 +16,7 @@ class TestRunForceUpdate:
                 run_force_update(config)
         assert exc_info.value.code == 0
         mock_update.assert_called_once_with(config, "1.2.3.4")
-        mock_email.assert_called_once_with(config, "1.2.3.4", True)
+        mock_email.assert_called_once_with(config, "1.2.3.4", success=True)
 
     def test_failure_exits_1(self, config):
         with (
@@ -26,7 +27,7 @@ class TestRunForceUpdate:
             with pytest.raises(SystemExit) as exc_info:
                 run_force_update(config)
         assert exc_info.value.code == 1
-        mock_email.assert_called_once_with(config, "1.2.3.4", False)
+        mock_email.assert_called_once_with(config, "1.2.3.4", success=False)
 
     def test_no_ip_exits_1(self, config):
         with patch("updater.get_ip_address", return_value=None):
@@ -63,8 +64,11 @@ class TestRunPollingLoop:
     def test_force_update_after_interval(self):
         # force_update_checks = 1*24*60//1440 = 1
         cfg = Config(
-            dyfi_user="u", dyfi_pass="p", dyfi_domain="d.dy.fi",
-            check_interval=1440, force_update_days=1,
+            dyfi_user="u",
+            dyfi_pass="p",
+            dyfi_domain="d.dy.fi",
+            check_interval=1440,
+            force_update_days=1,
         )
         with (
             patch("updater.get_ip_address", return_value="1.1.1.1"),
@@ -80,7 +84,9 @@ class TestRunPollingLoop:
 
     def test_update_failure_retries(self, config):
         with (
-            patch("updater.get_ip_address", side_effect=["1.1.1.1", "2.2.2.2", "2.2.2.2"]),
+            patch(
+                "updater.get_ip_address", side_effect=["1.1.1.1", "2.2.2.2", "2.2.2.2"]
+            ),
             patch("updater.update_dyndns", side_effect=[False, True]) as mock_update,
             patch("updater.send_email") as mock_email,
             patch.object(shutdown_event, "is_set", side_effect=[False, False, True]),
@@ -94,8 +100,11 @@ class TestRunPollingLoop:
 
     def test_force_update_failure_sends_email(self):
         cfg = Config(
-            dyfi_user="u", dyfi_pass="p", dyfi_domain="d.dy.fi",
-            check_interval=1440, force_update_days=1,
+            dyfi_user="u",
+            dyfi_pass="p",
+            dyfi_domain="d.dy.fi",
+            check_interval=1440,
+            force_update_days=1,
         )
         with (
             patch("updater.get_ip_address", return_value="1.1.1.1"),
@@ -178,7 +187,9 @@ class TestMain:
             patch("updater.run_polling_loop"),
         ):
             mock_env.return_value = Config(
-                dyfi_user="u", dyfi_pass="p", dyfi_domain="d.dy.fi",
+                dyfi_user="u",
+                dyfi_pass="p",
+                dyfi_domain="d.dy.fi",
                 log_file="/tmp/test.log",
             )
             main()
