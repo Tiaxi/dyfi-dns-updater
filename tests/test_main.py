@@ -1,4 +1,4 @@
-from unittest.mock import patch
+from unittest.mock import call, patch
 
 import pytest
 
@@ -37,9 +37,9 @@ class TestRunForceUpdate:
 
 
 class TestRunPollingLoop:
-    def test_ip_change_triggers_update(self, config):
+    def test_startup_sync_triggers_update(self, config):
         with (
-            patch("updater.get_ip_address", side_effect=["1.1.1.1", "2.2.2.2"]),
+            patch("updater.get_ip_address", return_value="1.1.1.1"),
             patch("updater.update_dyndns", return_value=True) as mock_update,
             patch("updater.send_email") as mock_email,
             patch.object(shutdown_event, "is_set", side_effect=[False, True]),
@@ -47,19 +47,40 @@ class TestRunPollingLoop:
             patch("updater.Path"),
         ):
             run_polling_loop(config)
-        mock_update.assert_called_once_with(config, "2.2.2.2")
-        mock_email.assert_called_once_with(config, "2.2.2.2", success=True)
+        mock_update.assert_called_once_with(config, "1.1.1.1")
+        mock_email.assert_called_once_with(config, "1.1.1.1", success=True)
 
-    def test_same_ip_no_update(self, config):
+    def test_ip_change_triggers_update(self, config):
         with (
-            patch("updater.get_ip_address", return_value="1.1.1.1"),
-            patch("updater.update_dyndns") as mock_update,
-            patch.object(shutdown_event, "is_set", side_effect=[False, True]),
+            patch("updater.get_ip_address", side_effect=["1.1.1.1", "2.2.2.2"]),
+            patch("updater.update_dyndns", return_value=True) as mock_update,
+            patch("updater.send_email") as mock_email,
+            patch.object(shutdown_event, "is_set", side_effect=[False, False, True]),
             patch.object(shutdown_event, "wait", return_value=False),
             patch("updater.Path"),
         ):
             run_polling_loop(config)
-        mock_update.assert_not_called()
+        assert mock_update.call_args_list == [
+            call(config, "1.1.1.1"),
+            call(config, "2.2.2.2"),
+        ]
+        assert mock_email.call_args_list == [
+            call(config, "1.1.1.1", success=True),
+            call(config, "2.2.2.2", success=True),
+        ]
+
+    def test_same_ip_only_updates_on_startup(self, config):
+        with (
+            patch("updater.get_ip_address", return_value="1.1.1.1"),
+            patch("updater.update_dyndns", return_value=True) as mock_update,
+            patch("updater.send_email") as mock_email,
+            patch.object(shutdown_event, "is_set", side_effect=[False, False, True]),
+            patch.object(shutdown_event, "wait", return_value=False),
+            patch("updater.Path"),
+        ):
+            run_polling_loop(config)
+        mock_update.assert_called_once_with(config, "1.1.1.1")
+        mock_email.assert_called_once_with(config, "1.1.1.1", success=True)
 
     def test_force_update_after_interval(self):
         # force_update_checks = 1*24*60//1440 = 1
@@ -73,20 +94,19 @@ class TestRunPollingLoop:
         with (
             patch("updater.get_ip_address", return_value="1.1.1.1"),
             patch("updater.update_dyndns", return_value=True) as mock_update,
-            patch("updater.send_email"),
-            # iter1: checks=0 < 1, skip. iter2: checks=1 >= 1, force. iter3: exit
+            patch("updater.send_email") as mock_email,
+            # iter1: startup sync. iter2: checks=1 >= 1, force. iter3: exit
             patch.object(shutdown_event, "is_set", side_effect=[False, False, True]),
             patch.object(shutdown_event, "wait", return_value=False),
             patch("updater.Path"),
         ):
             run_polling_loop(cfg)
-        mock_update.assert_called_once_with(cfg, "1.1.1.1")
+        assert mock_update.call_count == 2
+        assert mock_email.call_count == 2
 
-    def test_update_failure_retries(self, config):
+    def test_startup_sync_failure_retries(self, config):
         with (
-            patch(
-                "updater.get_ip_address", side_effect=["1.1.1.1", "2.2.2.2", "2.2.2.2"]
-            ),
+            patch("updater.get_ip_address", return_value="1.1.1.1"),
             patch("updater.update_dyndns", side_effect=[False, True]) as mock_update,
             patch("updater.send_email") as mock_email,
             patch.object(shutdown_event, "is_set", side_effect=[False, False, True]),
@@ -95,8 +115,8 @@ class TestRunPollingLoop:
         ):
             run_polling_loop(config)
         assert mock_update.call_count == 2
-        # Email only sent on success (not on IP-change failure)
-        mock_email.assert_called_once_with(config, "2.2.2.2", success=True)
+        mock_update.assert_called_with(config, "1.1.1.1")
+        mock_email.assert_called_once_with(config, "1.1.1.1", success=True)
 
     def test_force_update_failure_sends_email(self):
         cfg = Config(
@@ -108,18 +128,21 @@ class TestRunPollingLoop:
         )
         with (
             patch("updater.get_ip_address", return_value="1.1.1.1"),
-            patch("updater.update_dyndns", return_value=False),
+            patch("updater.update_dyndns", side_effect=[True, False]),
             patch("updater.send_email") as mock_email,
             patch.object(shutdown_event, "is_set", side_effect=[False, False, True]),
             patch.object(shutdown_event, "wait", return_value=False),
             patch("updater.Path"),
         ):
             run_polling_loop(cfg)
-        mock_email.assert_called_once_with(cfg, "1.1.1.1", success=False)
+        assert mock_email.call_args_list == [
+            call(cfg, "1.1.1.1", success=True),
+            call(cfg, "1.1.1.1", success=False),
+        ]
 
     def test_ip_failure_skips_update(self, config):
         with (
-            patch("updater.get_ip_address", side_effect=["1.1.1.1", None]),
+            patch("updater.get_ip_address", return_value=None),
             patch("updater.update_dyndns") as mock_update,
             patch.object(shutdown_event, "is_set", side_effect=[False, True]),
             patch.object(shutdown_event, "wait", return_value=False),
@@ -128,22 +151,24 @@ class TestRunPollingLoop:
             run_polling_loop(config)
         mock_update.assert_not_called()
 
-    def test_initial_ip_failure(self, config):
+    def test_initial_ip_failure_retries_lookup(self, config):
         with (
             patch("updater.get_ip_address", side_effect=[None, "1.1.1.1"]),
             patch("updater.update_dyndns", return_value=True) as mock_update,
-            patch("updater.send_email"),
-            patch.object(shutdown_event, "is_set", side_effect=[False, True]),
+            patch("updater.send_email") as mock_email,
+            patch.object(shutdown_event, "is_set", side_effect=[False, False, True]),
             patch.object(shutdown_event, "wait", return_value=False),
             patch("updater.Path"),
         ):
             run_polling_loop(config)
-        # prev_ip=None != ip="1.1.1.1" triggers update
         mock_update.assert_called_once_with(config, "1.1.1.1")
+        mock_email.assert_called_once_with(config, "1.1.1.1", success=True)
 
     def test_shutdown_breaks_loop(self, config):
         with (
             patch("updater.get_ip_address", return_value="1.1.1.1"),
+            patch("updater.update_dyndns", return_value=True),
+            patch("updater.send_email"),
             patch.object(shutdown_event, "is_set", side_effect=[False, True]),
             patch.object(shutdown_event, "wait", return_value=True),
             patch("updater.Path"),

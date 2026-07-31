@@ -7,6 +7,7 @@ Monitors your public IP address and automatically updates your dy.fi hostname wh
 ## Features
 
 - Polls public IP every 5 minutes (configurable)
+- Synchronizes dy.fi DNS on every startup
 - Automatically updates dy.fi when IP changes
 - Forces periodic update even without IP change (default: every 2 days)
 - Optional email notifications on successful updates

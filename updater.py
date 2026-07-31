@@ -199,9 +199,7 @@ def run_polling_loop(config: Config) -> None:
     """Continuously monitor IP changes and update dy.fi DNS."""
     logger.info(f"Check interval: {config.check_interval} minutes")
     logger.info(f"Force update interval: {config.force_update_days} days")
-    prev_ip = get_ip_address()
-    if prev_ip:
-        logger.info(f"Initial IP address is {prev_ip}")
+    synced_ip = None
     checks = 0
 
     while not shutdown_event.is_set():
@@ -212,17 +210,19 @@ def run_polling_loop(config: Config) -> None:
                 f" (check {checks}/{config.force_update_checks})"
             )
             force = checks >= config.force_update_checks
-            if prev_ip != ip or force:
-                if force:
+            if synced_ip != ip or force:
+                if synced_ip is None:
+                    logger.info(f"Synchronizing DNS on startup to {ip}")
+                elif force:
                     logger.info(
                         f"Forcing update after {checks} checks"
                         f" ({config.force_update_days} days)"
                     )
                 else:
-                    logger.info(f"IP address changed: {prev_ip} -> {ip}")
+                    logger.info(f"IP address changed: {synced_ip} -> {ip}")
                 success = update_dyndns(config, ip)
                 if success:
-                    prev_ip = ip
+                    synced_ip = ip
                     checks = 0
                     send_email(config, ip, success=True)
                 else:
